@@ -92,6 +92,47 @@ function calcKcal(rec) {
   if (rec.snacks) rec.snacks.forEach(s => { t += parseFloat(s.kcal) || 0; });
   return t || (rec.calories ? parseInt(rec.calories) : 0);
 }
+
+// --- RPGキャラクターシステム -------------------------------------------
+const RPG_LEVELS = [
+  { lv:0, name:"村人",         emoji:"👶", color:"#8b7355", bg:"#f5f0e8", desc:"冒険の始まり" },
+  { lv:1, name:"見習い冒険者", emoji:"🌱", color:"#5a9e6f", bg:"#e8f5ed", desc:"一歩踏み出した" },
+  { lv:2, name:"冒険者",       emoji:"⚔️", color:"#2980b9", bg:"#e8f0f8", desc:"旅に慣れてきた" },
+  { lv:3, name:"見習い戦士",   emoji:"🛡️", color:"#8e44ad", bg:"#f0e8f8", desc:"戦いの心得あり" },
+  { lv:4, name:"戦士",         emoji:"💪", color:"#c0392b", bg:"#fce8e8", desc:"頼れる仲間" },
+  { lv:5, name:"騎士",         emoji:"✨", color:"#d4ac0d", bg:"#fdf8e1", desc:"誇り高き戦士" },
+  { lv:6, name:"勇者",         emoji:"🔥", color:"#e67e22", bg:"#fdf2e1", desc:"選ばれし者" },
+  { lv:7, name:"英雄",         emoji:"⚡", color:"#1abc9c", bg:"#e1f8f4", desc:"伝説が始まる" },
+  { lv:8, name:"伝説の勇者",   emoji:"🌟", color:"#2c3e50", bg:"#eaf0f6", desc:"時代を超える強さ" },
+  { lv:9, name:"魔王討伐者",   emoji:"👑", color:"#f39c12", bg:"#fef9e7", desc:"頂点に立つ者" },
+];
+const EXP_PER_LEVEL = 40; // 1レベルアップに必要な経験値（10日×4pt）
+
+// 1日の経験値を計算
+function calcDayExp(rec, athlete) {
+  if (!rec?.saved) return 0;
+  let exp = 0;
+  // 条件1: 記録を保存した
+  exp += 1;
+  // 条件2: 体重を記録した
+  if (rec.weight && parseFloat(rec.weight) > 0) exp += 1;
+  // 条件3: 睡眠7時間以上
+  if (rec.sleep && parseFloat(rec.sleep) >= 7) exp += 1;
+  // 条件4: カロリー目標達成
+  const kcal = calcKcal(rec);
+  const target = getEffectiveTarget(athlete);
+  if (target && kcal >= target.target) exp += 1;
+  return exp;
+}
+
+// 全記録から総経験値とレベルを計算
+function calcRpgStatus(records, athlete) {
+  const totalExp = Object.values(records).reduce((sum, rec) => sum + calcDayExp(rec, athlete), 0);
+  const lv = Math.min(9, Math.floor(totalExp / EXP_PER_LEVEL));
+  const expInLevel = totalExp % EXP_PER_LEVEL;
+  const expToNext = EXP_PER_LEVEL;
+  return { totalExp, lv, expInLevel, expToNext, levelData: RPG_LEVELS[lv] };
+}
 function genId() { return "a" + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 
 // --- 高校球児向け目標摂取カロリー計算 ---------------------------
@@ -2032,11 +2073,18 @@ function CoachView({ onBack, onDetail }) {
             <div className="stitle">⚡ 本日のコンディション一覧</div>
             {recorded.length===0
               ? <div style={{textAlign:"center",padding:"16px 0",color:"#666",fontSize:13}}>本日の記録なし</div>
-              : recorded.map(a=>(
+              : recorded.map(a=>{
+                const rpgA = calcRpgStatus(a.recs||{}, a);
+                return (
                 <div key={a.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:"1px solid #f0ebe0"}}>
-                  <div style={{width:32,height:32,borderRadius:"50%",background:"#1c3a1c",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Anton,sans-serif",fontSize:11,color:"#f0e68c",flexShrink:0}}>{a.height ? `${a.height}` : "🏃"}</div>
+                  <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,#1c3a1c,#2e5c2e)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0,border:"2px solid "+rpgA.levelData.color}}>
+                    {rpgA.levelData.emoji}
+                  </div>
                   <div style={{flex:1}}>
-                    <div style={{fontWeight:700,fontSize:14}}>{a.name}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <div style={{fontWeight:700,fontSize:14}}>{a.name}</div>
+                      <div style={{fontSize:9,fontWeight:900,color:rpgA.levelData.color,background:rpgA.levelData.bg,padding:"1px 6px",borderRadius:10,border:`1px solid ${rpgA.levelData.color}40`}}>Lv.{rpgA.lv} {rpgA.levelData.name}</div>
+                    </div>
                     <div style={{fontSize:11,color:"#8b7355"}}>{a.position} {a.todayRec?.weight&&`• ${a.todayRec.weight}kg`}</div>
                     {/* 体力ゲージ */}
                     {a.todayRec?.stamina!=null&&(()=>{
@@ -2055,7 +2103,8 @@ function CoachView({ onBack, onDetail }) {
                     {FATIGUE_LABELS[a.todayRec.fatigue??2]}
                   </span>
                 </div>
-              ))
+                );
+              })
             }
           </div>
 
@@ -2455,6 +2504,34 @@ function AthleteDetail({ athlete, onBack }) {
 
         {/* TODAY */}
         {detailTab==="overview"&&<>
+          {/* RPGステータスカード（常時表示） */}
+          {(()=>{
+            const rpgA = calcRpgStatus(recs, athlete);
+            const pctA = Math.round(rpgA.expInLevel / rpgA.expToNext * 100);
+            return (
+              <div style={{background:`linear-gradient(135deg,#0d1f0d,#1a3520)`,borderRadius:14,padding:"14px 16px",marginBottom:12,border:`1.5px solid ${rpgA.levelData.color}40`}}>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{fontSize:44,lineHeight:1,filter:"drop-shadow(0 2px 8px rgba(0,0,0,.6))",minWidth:52,textAlign:"center"}}>{rpgA.levelData.emoji}</div>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+                      <div style={{fontSize:9,fontWeight:900,letterSpacing:2,color:"rgba(240,230,140,.7)"}}>LEVEL {rpgA.lv}</div>
+                      <div style={{fontSize:9,fontWeight:900,color:rpgA.levelData.color,background:rpgA.levelData.bg,padding:"1px 7px",borderRadius:10}}>{rpgA.levelData.name}</div>
+                    </div>
+                    <div style={{fontSize:10,color:"rgba(255,255,255,.45)",marginBottom:6}}>{rpgA.levelData.desc} • 総EXP {rpgA.totalExp}pt</div>
+                    {rpgA.lv < 9 ? <>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                        <div style={{fontSize:9,color:"rgba(255,255,255,.5)",fontWeight:700}}>次のレベルまで</div>
+                        <div style={{fontSize:9,color:"rgba(240,230,140,.8)",fontWeight:700}}>{rpgA.expInLevel} / {rpgA.expToNext} EXP</div>
+                      </div>
+                      <div style={{height:8,background:"rgba(255,255,255,.1)",borderRadius:4,overflow:"hidden"}}>
+                        <div style={{height:"100%",width:`${pctA}%`,background:`linear-gradient(90deg,${rpgA.levelData.color},#f0e68c)`,borderRadius:4,transition:"width .6s"}}/>
+                      </div>
+                    </> : <div style={{fontSize:11,color:"#f39c12",fontWeight:700}}>👑 最高レベル達成！</div>}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
           {!todayRec?.saved
             ? <div style={{textAlign:"center",padding:"60px 20px",color:"#8b7355",fontWeight:700}}><div style={{fontSize:48,marginBottom:12}}>📭</div>本日はまだ記録を提出していません</div>
             : <>
@@ -2823,6 +2900,11 @@ function PlayerView({ athlete, onBack }) {
   const avgWt=wts.length?(wts.reduce((a,b)=>a+b,0)/wts.length).toFixed(1):"--";
   const calcTotal=(rec)=>{let t=0;if(rec?.meals)Object.values(rec.meals).forEach(m=>{t+=parseFloat(m.kcal)||0;});if(rec?.snacks)rec.snacks.forEach(s=>{t+=parseFloat(s.kcal)||0;});return t||(rec?.calories?parseInt(rec.calories):0);};
 
+  // RPGステータス計算
+  const rpg = calcRpgStatus(records, athlete);
+  const todayExp = calcDayExp(record, athlete);
+  const pctExp = Math.round(rpg.expInLevel / rpg.expToNext * 100);
+
   // chart data
   const chartData=(getter,limit=20)=>histKeys.slice(0,limit).reverse().filter(k=>getter(records[k])!=null&&getter(records[k])!=="").map(k=>({label:k.slice(5).replace("-","/"),v:parseFloat(getter(records[k]))})).filter(d=>!isNaN(d.v));
   const wtData=chartData(r=>r?.weight);
@@ -2845,6 +2927,40 @@ function PlayerView({ athlete, onBack }) {
             <div style={{textAlign:"right"}}>
               <div style={{fontFamily:"Anton,sans-serif",fontSize:40,color:"#fff",lineHeight:1}}>{pad(new Date().getDate())}</div>
               <div style={{fontSize:11,color:"rgba(255,255,255,.6)",fontWeight:700}}>{new Date().getFullYear()}/{pad(new Date().getMonth()+1)} ({DAYS[new Date().getDay()]})</div>
+            </div>
+          </div>
+          {/* RPGキャラクターカード */}
+          <div style={{marginTop:12,background:"rgba(0,0,0,.25)",borderRadius:14,padding:"12px 14px",border:"1px solid rgba(255,255,255,.1)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              {/* キャラクター絵文字 */}
+              <div style={{fontSize:42,lineHeight:1,filter:"drop-shadow(0 2px 8px rgba(0,0,0,.5))",minWidth:50,textAlign:"center"}}>
+                {rpg.levelData.emoji}
+              </div>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+                  <div style={{fontSize:9,fontWeight:900,letterSpacing:2,color:"rgba(240,230,140,.7)"}}>LEVEL {rpg.lv}</div>
+                  {rpg.lv===9&&<div style={{fontSize:9,fontWeight:900,color:"#f39c12",background:"rgba(243,156,18,.2)",padding:"1px 6px",borderRadius:10,border:"1px solid rgba(243,156,18,.4)"}}>MAX</div>}
+                </div>
+                <div style={{fontFamily:"Anton,sans-serif",fontSize:20,color:"#f0e68c",letterSpacing:1,lineHeight:1.1}}>{rpg.levelData.name}</div>
+                <div style={{fontSize:10,color:"rgba(255,255,255,.5)",marginTop:2}}>{rpg.levelData.desc}</div>
+                {/* 経験値バー */}
+                {rpg.lv < 9 && <>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6,marginBottom:3}}>
+                    <div style={{fontSize:9,color:"rgba(255,255,255,.5)",fontWeight:700}}>EXP</div>
+                    <div style={{fontSize:9,color:"rgba(240,230,140,.8)",fontWeight:700}}>{rpg.expInLevel} / {rpg.expToNext}</div>
+                  </div>
+                  <div style={{height:6,background:"rgba(255,255,255,.1)",borderRadius:3,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:`${pctExp}%`,background:"linear-gradient(90deg,#f0c040,#f0e68c)",borderRadius:3,transition:"width .6s"}}/>
+                  </div>
+                </>}
+                {rpg.lv === 9 && <div style={{marginTop:6,fontSize:10,color:"#f39c12",fontWeight:700}}>👑 最高レベル達成！伝説の称号</div>}
+              </div>
+              {/* 今日の経験値 */}
+              <div style={{textAlign:"center",background:"rgba(240,230,140,.1)",borderRadius:10,padding:"8px 10px",border:"1px solid rgba(240,230,140,.2)",minWidth:44}}>
+                <div style={{fontSize:9,color:"rgba(240,230,140,.6)",fontWeight:700,marginBottom:2}}>今日</div>
+                <div style={{fontFamily:"Anton,sans-serif",fontSize:22,color:todayExp>0?"#f0e68c":"rgba(255,255,255,.3)",lineHeight:1}}>{todayExp}</div>
+                <div style={{fontSize:8,color:"rgba(255,255,255,.4)"}}>/ 4 EXP</div>
+              </div>
             </div>
           </div>
           {/* カレンダー */}
