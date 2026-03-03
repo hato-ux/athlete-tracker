@@ -1942,13 +1942,11 @@ function CoachView({ onBack, onDetail }) {
   const [coachTab, setCoachTab] = useState("team");
 
   // Supabaseから全データ取得
-  useEffect(() => {
-    setLoading(true);
+  const fetchAll = () => {
     Promise.all([
       fetchRosterFromSupabase(),
       fetchAllRecordsFromSupabase()
     ]).then(([sbRoster, sbRecords]) => {
-      // 選手リストをマージ
       if (sbRoster.length > 0) {
         const local = getRoster();
         const merged = [...sbRoster];
@@ -1958,7 +1956,18 @@ function CoachView({ onBack, onDetail }) {
       }
       setAllRecords(sbRecords);
       setLoading(false);
+      setLastUpdated(new Date());
     }).catch(() => setLoading(false));
+  };
+
+  const [lastUpdated, setLastUpdated] = useState(null);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchAll();
+    // 30秒ごとに自動更新
+    const timer = setInterval(() => { fetchAll(); }, 30000);
+    return () => clearInterval(timer);
   }, []);
 
   const deleteAthlete = async (athleteId) => {
@@ -2014,10 +2023,14 @@ function CoachView({ onBack, onDetail }) {
           <div>
             <div style={{fontSize:10,letterSpacing:3,color:"rgba(255,200,100,.7)",fontWeight:700,textTransform:"uppercase"}}>関学大附コンディショニング</div>
             <div style={{fontFamily:"'Noto Sans JP',sans-serif",fontSize:20,color:"#1c3a1c",letterSpacing:1,fontWeight:900}}>指導者ビュー</div>
+            {lastUpdated&&<div style={{fontSize:9,color:"rgba(255,255,255,.4)",marginTop:3}}>🔄 {lastUpdated.getHours()}:{String(lastUpdated.getMinutes()).padStart(2,"0")}:{String(lastUpdated.getSeconds()).padStart(2,"0")} 更新（30秒ごと自動）</div>}
           </div>
-          <div style={{textAlign:"right"}}>
-            <div style={{fontFamily:"Anton,sans-serif",fontSize:32,color:"#fff",lineHeight:1}}>{pad(new Date().getDate())}</div>
-            <div style={{fontSize:10,color:"rgba(255,255,255,.5)",fontWeight:700}}>{new Date().getFullYear()}/{pad(new Date().getMonth()+1)}({DAYS[new Date().getDay()]})</div>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontFamily:"Anton,sans-serif",fontSize:32,color:"#fff",lineHeight:1}}>{pad(new Date().getDate())}</div>
+              <div style={{fontSize:10,color:"rgba(255,255,255,.5)",fontWeight:700}}>{new Date().getFullYear()}/{pad(new Date().getMonth()+1)}({DAYS[new Date().getDay()]})</div>
+            </div>
+            <button onClick={()=>fetchAll()} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",borderRadius:8,color:"#fff",fontSize:11,fontWeight:700,padding:"5px 12px",cursor:"pointer",fontFamily:"'Noto Sans JP',sans-serif"}}>🔄 今すぐ更新</button>
           </div>
         </div>
       </div>
