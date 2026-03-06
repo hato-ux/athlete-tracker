@@ -2117,46 +2117,6 @@ function CoachView({ onBack, onDetail }) {
             </div>
           </div>
 
-          {/* コンディション一覧 */}
-          <div className="card gold">
-            <div className="stitle">⚡ 本日のコンディション一覧</div>
-            {recorded.length===0
-              ? <div style={{textAlign:"center",padding:"16px 0",color:"#666",fontSize:13}}>本日の記録なし</div>
-              : recorded.map(a=>{
-                const rpgA = calcRpgStatus(a.recs||{}, a);
-                return (
-                <div key={a.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:"1px solid #f0ebe0"}}>
-                  <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,#1c3a1c,#2e5c2e)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0,border:"2px solid "+rpgA.levelData.color}}>
-                    {rpgA.levelData.emoji}
-                  </div>
-                  <div style={{flex:1}}>
-                    <div style={{display:"flex",alignItems:"center",gap:6}}>
-                      <div style={{fontWeight:700,fontSize:14}}>{a.name}</div>
-                      <div style={{fontSize:9,fontWeight:900,color:rpgA.levelData.color,background:rpgA.levelData.bg,padding:"1px 6px",borderRadius:10,border:`1px solid ${rpgA.levelData.color}40`}}>Lv.{rpgA.lv} {rpgA.levelData.name}</div>
-                    </div>
-                    <div style={{fontSize:11,color:"#8b7355"}}>{a.position} {a.todayRec?.weight&&`• ${a.todayRec.weight}kg`}</div>
-                    {/* 体力ゲージ */}
-                    {a.todayRec?.stamina!=null&&(()=>{
-                      const s=a.todayRec.stamina;
-                      return <div style={{display:"flex",gap:2,marginTop:5}}>
-                        {[10,20,30,40,50,60,70,80,90,100].map(v=>{
-                          const active=s>=v;
-                          const c=v<=30?"#e74c3c":v<=50?"#e67e22":v<=70?"#f0c040":v<=90?"#2ecc71":"#00e5ff";
-                          return <div key={v} style={{flex:1,height:6,borderRadius:2,background:active?c:"#eee"}}/>;
-                        })}
-                        <span style={{fontSize:10,fontWeight:700,color:s>=80?"#2ecc71":s>=50?"#f0c040":s>=30?"#e67e22":"#e74c3c",marginLeft:4,whiteSpace:"nowrap"}}>{s}%</span>
-                      </div>;
-                    })()}
-                  </div>
-                  <span style={{fontSize:12,fontWeight:700,color:FATIGUE_COLORS[a.todayRec.fatigue??2],background:FATIGUE_BG[a.todayRec.fatigue??2],padding:"3px 10px",borderRadius:20}}>
-                    {FATIGUE_LABELS[a.todayRec.fatigue??2]}
-                  </span>
-                </div>
-                );
-              })
-            }
-          </div>
-
           {/* 指導メモ */}
           <div className="card blue">
             <div className="stitle">📝 指導メモ</div>
@@ -2192,30 +2152,42 @@ function CoachView({ onBack, onDetail }) {
               return (
                 <div key={a.id} style={{borderBottom:"1px solid #f0ebe0"}}>
                   {/* 選手行 */}
-                  <div className="athlete-row" style={{borderLeft:"none",borderLeftWidth:0,borderLeftColor:fatigue!=null?FATIGUE_COLORS[fatigue]:"#ccc",cursor:"pointer",margin:0,borderRadius:0,boxShadow:"none",background:isExpanded?"#f5f8ff":"#fff"}}
+                  <div className="athlete-row" style={{borderLeft:"4px solid "+(fatigue!=null?FATIGUE_COLORS[fatigue]:"#ddd"),borderLeftWidth:4,cursor:"pointer",margin:0,borderRadius:0,boxShadow:"none",background:isExpanded?"#f5f8ff":"#fff",padding:"10px 12px"}}
                     onClick={()=>!deleteMode && setExpandedAthlete(isExpanded?null:a.id)}>
                     <div style={{width:40,height:40,borderRadius:"50%",background:"linear-gradient(135deg,#1c3a1c,#2e5c2e)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0,border:"2px solid "+rpgA.levelData.color}}>
                       {rpgA.levelData.emoji}
                     </div>
-                    <div style={{flex:1}}>
-                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      {/* 1行目: 名前・バッジ */}
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
                         <span style={{fontWeight:900,fontSize:15}}>{a.name}</span>
                         {needsAttention&&<span style={{fontSize:10,fontWeight:700,color:"#e74c3c",background:"rgba(231,76,60,.1)",padding:"2px 6px",borderRadius:20}}>要注意</span>}
                         <span style={{fontSize:9,fontWeight:900,color:rpgA.levelData.color,background:rpgA.levelData.bg,padding:"1px 6px",borderRadius:10}}>Lv.{rpgA.lv}</span>
+                        {fatigue!=null&&<span style={{fontSize:10,fontWeight:700,color:FATIGUE_COLORS[fatigue],background:FATIGUE_BG[fatigue],padding:"1px 7px",borderRadius:12,marginLeft:"auto"}}>{FATIGUE_LABELS[fatigue]}</span>}
                       </div>
-                      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                        {a.todayRec?.saved ? (
-                          <>
-                            {a.todayRec.weight&&<span style={{fontSize:10,background:"#f0f7f0",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#1c3a1c"}}>⚖ {a.todayRec.weight}kg</span>}
-                            {a.todayRec.sleep&&<span style={{fontSize:10,background:"#f0f0ff",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#2471a3"}}>🌙 {a.todayRec.sleep}h</span>}
-                            {calcKcal(a.todayRec)>0&&<span style={{fontSize:10,background:"#fff8f0",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#d4a017"}}>🍽 {calcKcal(a.todayRec)}kcal</span>}
-                            {a.todayRec.pain?.length>0&&<span style={{fontSize:10,background:"#fde8e8",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#e74c3c"}}>🩹 {a.todayRec.pain.length}箇所</span>}
-                          </>
-                        ) : <span style={{fontSize:10,color:"#aaa"}}>本日未記録</span>}
-                      </div>
+                      {a.todayRec?.saved ? <>
+                        {/* 2行目: 体重・睡眠・kcal・痛み */}
+                        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:5}}>
+                          {a.todayRec.weight&&<span style={{fontSize:10,background:"#f0f7f0",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#1c3a1c"}}>⚖ {a.todayRec.weight}kg</span>}
+                          {a.todayRec.sleep&&<span style={{fontSize:10,background:"#f0f0ff",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#2471a3"}}>🌙 {a.todayRec.sleep}h</span>}
+                          {calcKcal(a.todayRec)>0&&<span style={{fontSize:10,background:"#fff8f0",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#d4a017"}}>🍽 {calcKcal(a.todayRec)}kcal</span>}
+                          {a.todayRec.pain?.length>0&&<span style={{fontSize:10,background:"#fde8e8",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#e74c3c"}}>🩹 {a.todayRec.pain.length}箇所</span>}
+                          {a.todayRec.throwingStatus&&<span style={{fontSize:10,background:"#e8f4fd",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#1a5276"}}>
+                            {{"no_throw":"🚫 ノースロー","catch_only":"🤝 キャッチのみ","no_knock":"⚾ ノックまで","game_limit":"✅ 球数制限","game_ok":"🟢 制限なし"}[a.todayRec.throwingStatus]}
+                          </span>}
+                        </div>
+                        {/* 3行目: 体力ゲージ */}
+                        {a.todayRec.stamina!=null&&<div style={{display:"flex",gap:2,alignItems:"center"}}>
+                          {[10,20,30,40,50,60,70,80,90,100].map(v=>{
+                            const active=a.todayRec.stamina>=v;
+                            const c=v<=30?"#e74c3c":v<=50?"#e67e22":v<=70?"#f0c040":v<=90?"#2ecc71":"#00e5ff";
+                            return <div key={v} style={{flex:1,height:5,borderRadius:2,background:active?c:"#eee"}}/>;
+                          })}
+                          <span style={{fontSize:9,fontWeight:700,color:a.todayRec.stamina>=80?"#2ecc71":a.todayRec.stamina>=50?"#f0c040":"#e74c3c",marginLeft:3,whiteSpace:"nowrap"}}>💪{a.todayRec.stamina}%</span>
+                        </div>}
+                      </> : <span style={{fontSize:10,color:"#aaa"}}>本日未記録</span>}
                     </div>
-                    <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
-                      {fatigue!=null&&<span style={{fontSize:10,fontWeight:700,color:FATIGUE_COLORS[fatigue],background:FATIGUE_BG[fatigue],padding:"2px 7px",borderRadius:14}}>{FATIGUE_LABELS[fatigue]}</span>}
+                    <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0,marginLeft:6}}>
                       {deleteMode
                         ? <button onClick={e=>{e.stopPropagation();setConfirmDelete(a);}}
                             style={{fontSize:11,fontWeight:700,color:"#fff",background:"#e74c3c",border:"none",borderRadius:12,padding:"3px 10px",cursor:"pointer"}}>削除</button>
