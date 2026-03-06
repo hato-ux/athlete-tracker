@@ -68,22 +68,57 @@ function saveRecords(athleteId, data) {
 }
 async function syncRecordToSupabase(athlete, dateKey, record) {
   try {
+    const kcal_total = (() => {
+      let t = 0;
+      if (record.meals) Object.values(record.meals).forEach(m => { t += parseFloat(m.kcal) || 0; });
+      if (record.snacks) record.snacks.forEach(s => { t += parseFloat(s.kcal) || 0; });
+      return t;
+    })();
     await sbFetch("records", {
       method: "POST",
       body: JSON.stringify({
         athlete_id: athlete.id,
         athlete_name: athlete.name,
         record_date: dateKey,
-        data: record
+        data: record,
+        weight: parseFloat(record.weight) || null,
+        sleep: parseFloat(record.sleep) || null,
+        fatigue: record.fatigue ?? null,
+        stamina: record.stamina ?? null,
+        kcal_total: kcal_total || null,
+        meals: record.meals || null,
+        snacks: record.snacks || null,
+        pain: record.pain || null,
+        throwing_status: record.throwingStatus || null,
+        memo: record.memo || null,
+        saved: record.saved || false,
       }),
       headers: { "Prefer": "resolution=merge-duplicates,return=representation" }
     });
-  } catch(e) { console.warn("Supabase record sync failed", e); }
+  } catch(e) { console.warn("Supabase record sync failed", e); throw e; }
 }
 async function fetchAllRecordsFromSupabase() {
   try {
     return await sbFetch("records?select=*&order=record_date.desc");
   } catch(e) { console.warn("Supabase records fetch failed", e); return []; }
+}
+
+// Supabaseの行からrecordオブジェクトを復元（個別カラム優先、dataをフォールバック）
+function rowToRecord(row) {
+  const base = row.data || {};
+  return {
+    ...base,
+    weight: row.weight != null ? String(row.weight) : (base.weight || ""),
+    sleep: row.sleep != null ? String(row.sleep) : (base.sleep || ""),
+    fatigue: row.fatigue != null ? row.fatigue : (base.fatigue ?? 2),
+    stamina: row.stamina != null ? row.stamina : (base.stamina ?? 50),
+    meals: row.meals || base.meals || {},
+    snacks: row.snacks || base.snacks || [],
+    pain: row.pain || base.pain || [],
+    throwingStatus: row.throwing_status || base.throwingStatus || "",
+    memo: row.memo || base.memo || "",
+    saved: row.saved ?? base.saved ?? false,
+  };
 }
 function calcKcal(rec) {
   if (!rec) return 0;
@@ -1939,7 +1974,7 @@ function CoachView({ onBack, onDetail }) {
   const [deleteMode, setDeleteMode] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [coachNote, setCoachNote] = useState(()=>localStorage.getItem("bb_coach_note")||"");
-  const [coachTab, setCoachTab] = useState("team");
+  const [expandedAthlete, setExpandedAthlete] = useState(null);
 
   // Supabaseから全データ取得
   const fetchAll = () => {
@@ -1987,10 +2022,11 @@ function CoachView({ onBack, onDetail }) {
   };
 
   const athleteData = roster.map(a => {
-    // Supabaseのレコードを優先、なければlocalStorageを使用
+    // Supabaseのレコードを取得（個別カラムから復元）
     const sbRecs = allRecords.filter(r => r.athlete_id === a.id);
     const recsFromSupa = {};
-    sbRecs.forEach(r => { recsFromSupa[r.record_date] = r.data; });
+    sbRecs.forEach(r => { recsFromSupa[r.record_date] = rowToRecord(r); });
+    // Supabaseを正とする（ローカルはSupabaseにない分だけ補完）
     const localRecs = getRecords(a.id);
     const recs = { ...localRecs, ...recsFromSupa };
     const todayRec = recs[today] || null;
@@ -2036,14 +2072,14 @@ function CoachView({ onBack, onDetail }) {
       </div>
 
       <div className="ctabbr">
-        {[["team","🏟 チーム全体"],["members","👥 選手個別"]].map(([id,lbl])=>(
-          <button key={id} className={`ctabbtn ${coachTab===id?"on":""}`} onClick={()=>setCoachTab(id)}>{lbl}</button>
+        {[["team","🏟 チーム全体"]].map(([id,lbl])=>(
+          <button key={id} className={`ctabbtn on`}>{lbl}</button>
         ))}
       </div>
 
       <div style={{padding:"14px 14px 80px",maxWidth:520,margin:"0 auto"}}>
 
-        {coachTab==="team" && <>
+        {<>
           {/* 記録状況 */}
           <div className="card navy">
             <div className="stitle">📊 本日の記録状況（{new Date().getMonth()+1}/{new Date().getDate()}）</div>
@@ -2132,69 +2168,112 @@ function CoachView({ onBack, onDetail }) {
               保存
             </button>
           </div>
+
+          {/* 選手一覧（タップで詳細展開） */}
+          <div className="card" style={{padding:0,overflow:"hidden"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",borderBottom:"1px solid #f0ebe0"}}>
+              <div className="stitle" style={{margin:0}}>👥 選手一覧（{roster.length}名）</div>
+              <button onClick={()=>setDeleteMode(m=>!m)}
+                style={{fontSize:11,fontWeight:700,padding:"4px 12px",borderRadius:20,border:"1px solid #e74c3c",background:deleteMode?"#e74c3c":"transparent",color:deleteMode?"#fff":"#e74c3c",cursor:"pointer"}}>
+                {deleteMode ? "✅ 完了" : "🗑 削除"}
+              </button>
+            </div>
+            {deleteMode && <div style={{background:"#fde8e8",padding:"8px 14px",fontSize:12,color:"#c0392b",fontWeight:700}}>⚠️ 削除モード：選手名の右の「削除」ボタンをタップ</div>}
+            {roster.length===0 && (
+              <div style={{textAlign:"center",padding:"40px 20px",color:"#666",fontSize:14}}>
+                <div style={{fontSize:48,marginBottom:12}}>👤</div>選手が登録されていません
+              </div>
+            )}
+            {athleteData.map(a=>{
+              const fatigue = a.todayRec?.saved ? (a.todayRec.fatigue??2) : null;
+              const needsAttention = fatigue!=null && (fatigue>=3 || fatigue===5);
+              const rpgA = calcRpgStatus(a.recs||{}, a);
+              const isExpanded = expandedAthlete === a.id;
+              return (
+                <div key={a.id} style={{borderBottom:"1px solid #f0ebe0"}}>
+                  {/* 選手行 */}
+                  <div className="athlete-row" style={{borderLeft:"none",borderLeftWidth:0,borderLeftColor:fatigue!=null?FATIGUE_COLORS[fatigue]:"#ccc",cursor:"pointer",margin:0,borderRadius:0,boxShadow:"none",background:isExpanded?"#f5f8ff":"#fff"}}
+                    onClick={()=>!deleteMode && setExpandedAthlete(isExpanded?null:a.id)}>
+                    <div style={{width:40,height:40,borderRadius:"50%",background:"linear-gradient(135deg,#1c3a1c,#2e5c2e)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0,border:"2px solid "+rpgA.levelData.color}}>
+                      {rpgA.levelData.emoji}
+                    </div>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+                        <span style={{fontWeight:900,fontSize:15}}>{a.name}</span>
+                        {needsAttention&&<span style={{fontSize:10,fontWeight:700,color:"#e74c3c",background:"rgba(231,76,60,.1)",padding:"2px 6px",borderRadius:20}}>要注意</span>}
+                        <span style={{fontSize:9,fontWeight:900,color:rpgA.levelData.color,background:rpgA.levelData.bg,padding:"1px 6px",borderRadius:10}}>Lv.{rpgA.lv}</span>
+                      </div>
+                      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                        {a.todayRec?.saved ? (
+                          <>
+                            {a.todayRec.weight&&<span style={{fontSize:10,background:"#f0f7f0",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#1c3a1c"}}>⚖ {a.todayRec.weight}kg</span>}
+                            {a.todayRec.sleep&&<span style={{fontSize:10,background:"#f0f0ff",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#2471a3"}}>🌙 {a.todayRec.sleep}h</span>}
+                            {calcKcal(a.todayRec)>0&&<span style={{fontSize:10,background:"#fff8f0",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#d4a017"}}>🍽 {calcKcal(a.todayRec)}kcal</span>}
+                            {a.todayRec.pain?.length>0&&<span style={{fontSize:10,background:"#fde8e8",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#e74c3c"}}>🩹 {a.todayRec.pain.length}箇所</span>}
+                          </>
+                        ) : <span style={{fontSize:10,color:"#aaa"}}>本日未記録</span>}
+                      </div>
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
+                      {fatigue!=null&&<span style={{fontSize:10,fontWeight:700,color:FATIGUE_COLORS[fatigue],background:FATIGUE_BG[fatigue],padding:"2px 7px",borderRadius:14}}>{FATIGUE_LABELS[fatigue]}</span>}
+                      {deleteMode
+                        ? <button onClick={e=>{e.stopPropagation();setConfirmDelete(a);}}
+                            style={{fontSize:11,fontWeight:700,color:"#fff",background:"#e74c3c",border:"none",borderRadius:12,padding:"3px 10px",cursor:"pointer"}}>削除</button>
+                        : <span style={{fontSize:13,color:"#aaa",transform:isExpanded?"rotate(90deg)":"rotate(0deg)",display:"inline-block",transition:"transform .2s"}}>›</span>
+                      }
+                    </div>
+                  </div>
+                  {/* 展開詳細 */}
+                  {isExpanded && !deleteMode && (
+                    <div style={{background:"#f5f8ff",padding:"12px 14px",borderTop:"1px solid #e8edf8"}}>
+                      {/* 今日のデータ詳細 */}
+                      {a.todayRec?.saved ? <>
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:10}}>
+                          {[["⚖ 体重",a.todayRec.weight?`${a.todayRec.weight}kg`:"--","#1c3a1c"],
+                            ["🌙 睡眠",a.todayRec.sleep?`${a.todayRec.sleep}h`:"--","#2471a3"],
+                            ["🍽 kcal",calcKcal(a.todayRec)?`${calcKcal(a.todayRec)}`:"--","#d4a017"]
+                          ].map(([lbl,val,color])=>(
+                            <div key={lbl} style={{background:"#fff",borderRadius:8,padding:"8px 6px",textAlign:"center",border:`1px solid ${color}30`}}>
+                              <div style={{fontSize:9,color:"#8b7355",fontWeight:700,marginBottom:3}}>{lbl}</div>
+                              <div style={{fontFamily:"Anton,sans-serif",fontSize:18,color,lineHeight:1}}>{val}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {/* コンディション */}
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                          <span style={{fontSize:12,fontWeight:700,color:FATIGUE_COLORS[a.todayRec.fatigue??2]}}>{FATIGUE_LABELS[a.todayRec.fatigue??2]}</span>
+                          {a.todayRec.throwingStatus&&<span style={{fontSize:11,background:"#e8f4fd",padding:"2px 8px",borderRadius:12,fontWeight:700,color:"#1a5276"}}>
+                            {{"no_throw":"🚫 ノースロー","catch_only":"🤝 キャッチのみ","no_knock":"⚾ ノックまで","game_limit":"✅ 球数制限あり","game_ok":"🟢 制限なし"}[a.todayRec.throwingStatus]}
+                          </span>}
+                          {a.todayRec.pain?.length>0&&<span style={{fontSize:11,background:"#fde8e8",padding:"2px 8px",borderRadius:12,fontWeight:700,color:"#e74c3c"}}>🩹 {a.todayRec.pain.join("・")}</span>}
+                        </div>
+                        {/* 体力ゲージ */}
+                        {a.todayRec.stamina!=null&&<div style={{marginBottom:8}}>
+                          <div style={{fontSize:10,color:"#8b7355",fontWeight:700,marginBottom:4}}>💪 体力ゲージ {a.todayRec.stamina}%</div>
+                          <div style={{display:"flex",gap:2}}>
+                            {[10,20,30,40,50,60,70,80,90,100].map(v=>{
+                              const active=a.todayRec.stamina>=v;
+                              const c=v<=30?"#e74c3c":v<=50?"#e67e22":v<=70?"#f0c040":v<=90?"#2ecc71":"#00e5ff";
+                              return <div key={v} style={{flex:1,height:6,borderRadius:2,background:active?c:"#eee"}}/>;
+                            })}
+                          </div>
+                        </div>}
+                        {/* メモ */}
+                        {a.todayRec.memo&&<div style={{fontSize:11,color:"#555",background:"#fff",padding:"6px 10px",borderRadius:8,border:"1px solid #e0e0e0"}}>💬 {a.todayRec.memo}</div>}
+                      </> : <div style={{textAlign:"center",padding:"12px 0",color:"#aaa",fontSize:12}}>本日はまだ記録を提出していません</div>}
+                      {/* 詳細ページへ */}
+                      <button onClick={e=>{e.stopPropagation();onDetail(a);}}
+                        style={{width:"100%",marginTop:10,padding:"9px 0",background:"#1c3a1c",border:"none",borderRadius:8,color:"#f0e68c",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Noto Sans JP',sans-serif"}}>
+                        📊 詳細・履歴を見る →
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </>}
 
-        {coachTab==="members" && <>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-            <div style={{fontSize:11,fontWeight:700,color:"#8b7355",letterSpacing:1,textTransform:"uppercase"}}>
-              選手をタップして個人記録を確認 ({roster.length}名)
-            </div>
-            <button onClick={()=>setDeleteMode(m=>!m)}
-              style={{fontSize:11,fontWeight:700,padding:"4px 12px",borderRadius:20,border:"1px solid #e74c3c",background:deleteMode?"#e74c3c":"transparent",color:deleteMode?"#fff":"#e74c3c",cursor:"pointer"}}>
-              {deleteMode ? "✅ 完了" : "🗑 削除"}
-            </button>
-          </div>
-          {deleteMode && <div style={{background:"#fde8e8",borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:"#c0392b",fontWeight:700}}>⚠️ 削除モード：選手名の右の「削除」ボタンをタップ</div>}
-          {roster.length===0 && (
-            <div style={{textAlign:"center",padding:"40px 20px",color:"#666",fontSize:14}}>
-              <div style={{fontSize:48,marginBottom:12}}>👤</div>選手が登録されていません
-            </div>
-          )}
-          {athleteData.map(a=>{
-            const fatigue = a.todayRec?.saved ? (a.todayRec.fatigue??2) : null;
-            const needsAttention = fatigue!=null && (fatigue>=3 || fatigue===5);
-            return (
-              <div key={a.id} className="athlete-row"
-                style={{borderLeftColor:fatigue!=null?FATIGUE_COLORS[fatigue]:"#ccc", cursor: deleteMode ? "default" : "pointer"}}
-                onClick={()=>!deleteMode && onDetail(a)}>
-                <div style={{width:44,height:44,borderRadius:"50%",background:"#1c3a1c",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Anton,sans-serif",fontSize:13,color:"#f0e68c",flexShrink:0}}>{a.height ? `${a.height}` : "🏃"}</div>
-                <div style={{flex:1}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                    <span style={{fontWeight:900,fontSize:16}}>{a.name}</span>
-                    {needsAttention && <span style={{fontSize:10,fontWeight:700,color:"#e74c3c",background:"rgba(231,76,60,.1)",padding:"2px 8px",borderRadius:20}}>要注意</span>}
-                  </div>
-                  <div style={{fontSize:11,color:"#8b7355",marginBottom:6}}>{a.position} • {a.allKeys.length}日分の記録</div>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                    {a.todayRec?.saved ? (
-                      <>
-                        {a.todayRec.weight&&<span style={{fontSize:11,background:"#f0f7f0",padding:"2px 8px",borderRadius:12,fontWeight:700,color:"#1c3a1c"}}>⚖ {a.todayRec.weight}kg</span>}
-                        {a.todayRec.sleep&&<span style={{fontSize:11,background:"#f0f0ff",padding:"2px 8px",borderRadius:12,fontWeight:700,color:"#2471a3"}}>🌙 {a.todayRec.sleep}h</span>}
-                        {calcKcal(a.todayRec)>0&&<span style={{fontSize:11,background:"#fff8f0",padding:"2px 8px",borderRadius:12,fontWeight:700,color:"#d4a017"}}>🍽 {calcKcal(a.todayRec)}kcal</span>}
-                        {a.todayRec.pain?.length>0&&<span style={{fontSize:11,background:"#fde8e8",padding:"2px 8px",borderRadius:12,fontWeight:700,color:"#e74c3c"}}>🩹 {a.todayRec.pain.length}箇所</span>}
-                        {a.todayRec.throwingStatus&&<span style={{fontSize:11,background:"#e8f4fd",padding:"2px 8px",borderRadius:12,fontWeight:700,color:"#1a5276"}}>
-                          {{"no_throw":"🚫 ノースロー","catch_only":"🤝 キャッチのみ","no_knock":"⚾ ノックまで","game_limit":"✅ 球数制限あり","game_ok":"🟢 制限なし"}[a.todayRec.throwingStatus]}
-                        </span>}
-                        {a.todayRec.stamina!=null&&(()=>{
-                          const s=a.todayRec.stamina;
-                          const c=s>=80?"#2ecc71":s>=50?"#f0c040":s>=30?"#e67e22":"#e74c3c";
-                          return <span style={{fontSize:11,background:`${c}18`,padding:"2px 8px",borderRadius:12,fontWeight:700,color:c}}>💪 {s}%</span>;
-                        })()}
-                      </>
-                    ) : <span style={{fontSize:11,color:"#666"}}>本日未記録</span>}
-                  </div>
-                </div>
-                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
-                  {fatigue!=null&&<span style={{fontSize:10,fontWeight:700,color:FATIGUE_COLORS[fatigue],background:FATIGUE_BG[fatigue],padding:"3px 8px",borderRadius:16}}>{FATIGUE_LABELS[fatigue]}</span>}
-                  {deleteMode
-                    ? <button onClick={e=>{e.stopPropagation();setConfirmDelete(a);}}
-                        style={{fontSize:11,fontWeight:700,color:"#fff",background:"#e74c3c",border:"none",borderRadius:12,padding:"3px 10px",cursor:"pointer"}}>削除</button>
-                    : <span style={{fontSize:11,color:"#666"}}>詳細 ›</span>
-                  }
-                </div>
-              </div>
-            );
-          })}
-        </>}
       </div>
       {/* 削除確認モーダル */}
       {confirmDelete && (
@@ -2431,7 +2510,7 @@ function AthleteDetail({ athlete, onBack }) {
     sbFetch(`records?athlete_id=eq.${athlete.id}&select=*&order=record_date.desc`)
       .then(sbRecs => {
         const merged = {...getRecords(athlete.id)};
-        sbRecs.forEach(r => { merged[r.record_date] = r.data; });
+        sbRecs.forEach(r => { merged[r.record_date] = rowToRecord(r); });
         saveRecords(athlete.id, merged);
         setRecs(merged);
         setLoading(false);
@@ -2827,11 +2906,11 @@ function PlayerView({ athlete, onBack }) {
         const local = getRecords(athlete.id);
         const merged = {...local};
         sbRecs.forEach(r => {
-          // Supabaseのデータを優先（ただし今日分はローカルを優先）
+          // Supabaseのデータを優先（ただし今日分はローカル保存済みを優先）
           if (r.record_date !== TODAY) {
-            merged[r.record_date] = r.data;
+            merged[r.record_date] = rowToRecord(r);
           } else if (!local[TODAY]?.saved) {
-            merged[r.record_date] = r.data;
+            merged[r.record_date] = rowToRecord(r);
           }
         });
         saveRecords(athlete.id, merged);
@@ -2850,11 +2929,15 @@ function PlayerView({ athlete, onBack }) {
 
   const totalKcal=()=>{ let t=0; Object.values(record.meals).forEach(m=>{t+=parseFloat(m.kcal)||0;}); record.snacks.forEach(s=>{t+=parseFloat(s.kcal)||0;}); return t; };
 
-  const save=()=>{
+  const save=async()=>{
     const next={...records,[TODAY]:{...record,saved:true}};
     setRecords(next); saveRecords(athlete.id,next); setRecord(r=>({...r,saved:true}));
-    syncRecordToSupabase(athlete, TODAY, {...record,saved:true}); // Supabaseに同期
-    setToast("⚾ 記録を保存したぞ！");
+    try {
+      await syncRecordToSupabase(athlete, TODAY, {...record,saved:true});
+      setToast("⚾ 記録を保存したぞ！");
+    } catch(e) {
+      setToast("⚠️ 保存に失敗しました。再度試してください。");
+    }
   };
 
   const estimateMenu=(menuText,mealKey,snackIdx)=>{
@@ -3079,10 +3162,20 @@ function PlayerView({ athlete, onBack }) {
                 <div style={{fontSize:11,color:"#8b7355",fontWeight:700,marginTop:4,textAlign:"right"}}>kg</div>
               </div>
               <div className="card">
-                <div className="stitle">🌙 睡眠</div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div className="stitle" style={{margin:0}}>🌙 睡眠</div>
+                  <div style={{fontSize:10,fontWeight:700,color:"#2471a3",background:"#e8f0ff",padding:"2px 8px",borderRadius:10}}>目標 8時間</div>
+                </div>
                 <input className="ni" type="number" placeholder="7.5" step="0.5" min="0" max="24" value={record.sleep} onChange={e=>setRecord(r=>({...r,sleep:e.target.value}))}/>
-                <div style={{fontSize:11,color:"#8b7355",fontWeight:700,marginTop:4,textAlign:"right"}}>時間</div>
-                {record.sleep&&<div style={{marginTop:6,height:5,background:"#f0ebe0",borderRadius:3}}><div style={{height:"100%",borderRadius:3,transition:"width .3s",width:`${Math.min(100,parseFloat(record.sleep)/10*100)}%`,background:parseFloat(record.sleep)>=7?"#2ecc71":parseFloat(record.sleep)>=5?"#f0c040":"#e74c3c"}}/></div>}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
+                  <div style={{fontSize:11,color:record.sleep?(parseFloat(record.sleep)>=8?"#2ecc71":parseFloat(record.sleep)>=7?"#f0c040":"#e74c3c"):"#8b7355",fontWeight:700}}>
+                    {record.sleep?(parseFloat(record.sleep)>=8?"✅ 目標達成！":parseFloat(record.sleep)>=7?"😊 あと少し":("😴 +"+(8-parseFloat(record.sleep)).toFixed(1)+"h必要")):""}
+                  </div>
+                  <div style={{fontSize:11,color:"#8b7355",fontWeight:700}}>時間</div>
+                </div>
+                {record.sleep&&<div style={{marginTop:6,height:5,background:"#f0ebe0",borderRadius:3}}>
+                  <div style={{height:"100%",borderRadius:3,transition:"width .3s",width:`${Math.min(100,parseFloat(record.sleep)/8*100)}%`,background:parseFloat(record.sleep)>=8?"#2ecc71":parseFloat(record.sleep)>=7?"#f0c040":"#e74c3c"}}/>
+                </div>}
               </div>
             </div>
 
