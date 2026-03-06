@@ -9,6 +9,8 @@ const INBODY_DATA = {"dates":["2025-09-28","2025-11-22","2025-12-27","2026-01-25
 const DAYS = ["日","月","火","水","木","金","土"];
 function todayKey() {
   const d = new Date();
+  // 午前3時未満は前日扱い
+  if (d.getHours() < 3) d.setDate(d.getDate() - 1);
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
 function pad(n){ return String(n).padStart(2,"0"); }
