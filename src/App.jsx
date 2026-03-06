@@ -1810,6 +1810,7 @@ function PlayerSelect({ onSelect, onBack }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name:"", position:"投手", height:"", goal:"bulk" });
   const [err, setErr] = useState("");
+  const [todayRecs, setTodayRecs] = useState({}); // 全選手の今日の記録
 
   const register = () => {
     if (!form.name.trim()) { setErr("名前を入力してください"); return; }
@@ -1824,16 +1825,19 @@ function PlayerSelect({ onSelect, onBack }) {
     const next = [...roster, newAthlete];
     saveRoster(next);
     setRoster(next);
-    syncRosterToSupabase(newAthlete); // Supabaseに同期
+    syncRosterToSupabase(newAthlete);
     setShowForm(false);
     setForm({ name:"", position:"投手", height:"", goal:"bulk" });
     setErr("");
     onSelect(newAthlete);
   };
 
-  // Supabaseから選手リストを取得してローカルにマージ
+  // Supabaseから選手リストと今日の記録を取得
   useEffect(() => {
-    fetchRosterFromSupabase().then(sbRoster => {
+    Promise.all([
+      fetchRosterFromSupabase(),
+      sbFetch(`records?record_date=eq.${today}&select=*`)
+    ]).then(([sbRoster, sbToday]) => {
       if (sbRoster.length > 0) {
         const local = getRoster();
         const merged = [...sbRoster];
@@ -1841,6 +1845,23 @@ function PlayerSelect({ onSelect, onBack }) {
         saveRoster(merged);
         setRoster(merged);
       }
+      // 今日の記録をathlete_idをキーにしたmapに変換
+      const recMap = {};
+      sbToday.forEach(r => { recMap[r.athlete_id] = rowToRecord(r); });
+      // ローカルの記録もマージ（保存済みのもの優先）
+      getRoster().forEach(a => {
+        const local = getRecords(a.id)[today];
+        if (local?.saved && !recMap[a.id]) recMap[a.id] = local;
+      });
+      setTodayRecs(recMap);
+    }).catch(()=>{
+      // フォールバック: ローカルのみ
+      const recMap = {};
+      getRoster().forEach(a => {
+        const local = getRecords(a.id)[today];
+        if (local?.saved) recMap[a.id] = local;
+      });
+      setTodayRecs(recMap);
     });
   }, []);
 
@@ -1852,6 +1873,37 @@ function PlayerSelect({ onSelect, onBack }) {
         <button onClick={onBack} style={{background:"none",border:"none",color:"rgba(255,255,255,.5)",cursor:"pointer",fontSize:13,fontWeight:700,marginBottom:8,padding:0}}>← 戻る</button>
         <div style={{fontFamily:"Anton,sans-serif",fontSize:24,color:"#1c3a1c",letterSpacing:2}}>選手を選択</div>
         <div style={{fontSize:12,color:"rgba(255,255,255,.5)",marginTop:2}}>自分の名前を選んで記録を開始</div>
+
+        {/* 記録状況サマリー */}
+        {roster.length > 0 && (()=>{
+          const recordedCount = Object.keys(todayRecs).filter(id => todayRecs[id]?.saved).length;
+          const notRecorded = roster.filter(a => !todayRecs[a.id]?.saved);
+          return (
+            <div style={{marginTop:12}}>
+              <div style={{display:"flex",gap:8,marginBottom:notRecorded.length>0?8:0}}>
+                {[["✓ 記録済み", recordedCount, "#2ecc71", "rgba(46,204,113,.15)"],
+                  ["未提出", roster.length - recordedCount, "#f0c040", "rgba(240,192,64,.15)"],
+                  ["総人数", roster.length, "rgba(255,255,255,.7)", "rgba(255,255,255,.08)"]
+                ].map(([lbl,val,color,bg])=>(
+                  <div key={lbl} style={{flex:1,background:bg,borderRadius:10,padding:"8px 6px",textAlign:"center",border:`1px solid ${color}30`}}>
+                    <div style={{fontFamily:"Anton,sans-serif",fontSize:22,color,lineHeight:1}}>{val}</div>
+                    <div style={{fontSize:9,color:"rgba(255,255,255,.5)",fontWeight:700,marginTop:3}}>{lbl}</div>
+                  </div>
+                ))}
+              </div>
+              {notRecorded.length > 0 && (
+                <div style={{background:"rgba(240,192,64,.1)",borderRadius:8,padding:"7px 10px",border:"1px solid rgba(240,192,64,.25)"}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#f0c040",marginBottom:4}}>⚠️ 未提出</div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                    {notRecorded.map(a=>(
+                      <span key={a.id} style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,.7)",background:"rgba(255,255,255,.08)",padding:"2px 8px",borderRadius:12}}>{a.name}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       <div style={{padding:"16px 16px 100px",maxWidth:480,margin:"0 auto"}}>
@@ -1863,22 +1915,46 @@ function PlayerSelect({ onSelect, onBack }) {
         )}
 
         {roster.map(a => {
-          const recs = getRecords(a.id);
-          const todayDone = !!recs[today]?.saved;
+          const rec = todayRecs[a.id] || getRecords(a.id)[today];
+          const todayDone = !!rec?.saved;
+          const kcal = calcKcal(rec);
+          const meals = rec?.meals || {};
+          const mFilled = (k) => meals[k] && (parseFloat(meals[k].kcal)>0 || meals[k].note?.trim());
           return (
             <button key={a.id} onClick={()=>onSelect(a)}
               style={{width:"100%",background:"rgba(255,255,255,.06)",border:`2px solid ${todayDone?"#2ecc71":"rgba(255,255,255,.15)"}`,
-                borderRadius:12,padding:"16px 18px",marginBottom:10,cursor:"pointer",display:"flex",alignItems:"center",gap:14,transition:"all .2s",textAlign:"left"}}>
-              <div style={{width:48,height:48,borderRadius:"50%",background:"#f0e68c",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Anton,sans-serif",fontSize:14,color:"#1c3a1c",flexShrink:0}}>
+                borderRadius:12,padding:"12px 14px",marginBottom:10,cursor:"pointer",display:"flex",alignItems:"flex-start",gap:12,transition:"all .2s",textAlign:"left"}}>
+              <div style={{width:44,height:44,borderRadius:"50%",background:"#f0e68c",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Anton,sans-serif",fontSize:13,color:"#1c3a1c",flexShrink:0,marginTop:2}}>
                 {a.height ? `${a.height}` : "🏃"}
               </div>
-              <div style={{flex:1}}>
-                <div style={{fontWeight:900,fontSize:17,color:"#fff"}}>{a.name}</div>
-                <div style={{fontSize:12,color:"rgba(255,255,255,.5)",marginTop:2}}>{a.position}{a.height ? ` • ${a.height}cm` : ""}{a.goal ? ` • ${a.goal==="bulk"?"💪増量":a.goal==="cut"?"🔥減量":"⚖️維持"}` : ""}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:3}}>
+                  <div style={{fontWeight:900,fontSize:16,color:"#fff"}}>{a.name}</div>
+                  {todayDone
+                    ? <div style={{fontSize:11,fontWeight:700,color:"#2ecc71",background:"rgba(46,204,113,.15)",padding:"3px 8px",borderRadius:14,flexShrink:0}}>✓ 記録済み</div>
+                    : <div style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,.3)"}}>未記録</div>}
+                </div>
+                <div style={{fontSize:11,color:"rgba(255,255,255,.4)",marginBottom:todayDone?6:0}}>{a.position}{a.height ? ` • ${a.height}cm` : ""}{a.goal ? ` • ${a.goal==="bulk"?"💪増量":a.goal==="cut"?"🔥減量":"⚖️維持"}` : ""}</div>
+                {todayDone && rec && <>
+                  {/* 体重・睡眠・kcal */}
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:5}}>
+                    {rec.weight&&<span style={{fontSize:10,background:"rgba(255,255,255,.1)",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#a8e6a8"}}>⚖ {rec.weight}kg</span>}
+                    {rec.sleep&&<span style={{fontSize:10,background:"rgba(255,255,255,.1)",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#a8c8e8"}}>🌙 {rec.sleep}h</span>}
+                    {kcal>0&&<span style={{fontSize:10,background:"rgba(255,255,255,.1)",padding:"1px 7px",borderRadius:10,fontWeight:700,color:"#f0c040"}}>🍽 {kcal}kcal</span>}
+                  </div>
+                  {/* 朝昼晩 */}
+                  <div style={{display:"flex",gap:4}}>
+                    {[{k:"morning",i:"🌅",l:"朝"},{k:"lunch",i:"☀️",l:"昼"},{k:"dinner",i:"🌙",l:"晩"}].map(({k,i,l})=>(
+                      <span key={k} style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:8,
+                        background:mFilled(k)?"rgba(46,204,113,.2)":"rgba(255,255,255,.05)",
+                        color:mFilled(k)?"#2ecc71":"rgba(255,255,255,.2)",
+                        border:`1px solid ${mFilled(k)?"rgba(46,204,113,.4)":"rgba(255,255,255,.1)"}`}}>
+                        {i}{l} {mFilled(k)?"✓":"−"}
+                      </span>
+                    ))}
+                  </div>
+                </>}
               </div>
-              {todayDone
-                ? <div style={{fontSize:11,fontWeight:700,color:"#2ecc71",background:"rgba(46,204,113,.15)",padding:"4px 10px",borderRadius:20}}>✓ 記録済み</div>
-                : <div style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,.3)",padding:"4px 10px"}}>未記録</div>}
             </button>
           );
         })}
