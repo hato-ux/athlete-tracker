@@ -2960,7 +2960,9 @@ function PlayerView({ athlete, onBack }) {
   const [toast, setToast]     = useState("");
   const [expandedMeal, setExp]= useState(null);
   const fileRefs = useRef({});
-  const [teamToday, setTeamToday] = useState([]); // 他の選手の今日のデータ
+  const [teamToday, setTeamToday] = useState([]);
+  const [editingHeight, setEditingHeight] = useState(false);
+  const [heightInput, setHeightInput] = useState(athlete.height || "");
 
   // チーム全員の今日の記録を取得
   useEffect(()=>{
@@ -3099,7 +3101,36 @@ function PlayerView({ athlete, onBack }) {
               <button onClick={onBack} style={{background:"none",border:"none",color:"rgba(240,230,140,.6)",cursor:"pointer",fontSize:12,fontWeight:700,padding:0,marginBottom:4}}>← モード選択</button>
               <div style={{fontSize:10,letterSpacing:3,color:"rgba(240,230,140,.7)",fontWeight:700,textTransform:"uppercase",marginBottom:2}}>⚾ PLAYER LOG</div>
               <div style={{fontFamily:"Anton,sans-serif",fontSize:20,color:"#f0e68c",letterSpacing:1}}>{athlete.name}</div>
-              <div style={{fontSize:11,color:"rgba(255,255,255,.5)",marginTop:1}}>{athlete.position}{athlete.height ? ` • ${athlete.height}cm` : ""}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginTop:1}}>
+                {editingHeight ? (
+                  <div style={{display:"flex",alignItems:"center",gap:5}}>
+                    <input type="number" value={heightInput} onChange={e=>setHeightInput(e.target.value)}
+                      style={{width:60,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.4)",borderRadius:6,color:"#fff",fontSize:13,fontWeight:700,padding:"2px 6px",fontFamily:"'Noto Sans JP',sans-serif"}}
+                      placeholder="175" min="100" max="230"/>
+                    <span style={{fontSize:11,color:"rgba(255,255,255,.5)"}}>cm</span>
+                    <button onClick={async()=>{
+                      const h = heightInput.trim();
+                      if (!h) return;
+                      athlete.height = h;
+                      const roster = getRoster();
+                      const idx = roster.findIndex(a=>a.id===athlete.id);
+                      if (idx>=0) { roster[idx].height = h; saveRoster(roster); }
+                      try { await sbFetch(`roster?id=eq.${athlete.id}`,{method:"PATCH",body:JSON.stringify({height:h}),headers:{"Prefer":"return=representation"}}); } catch(e){}
+                      setEditingHeight(false);
+                      setToast("✅ 身長を更新しました！");
+                    }} style={{background:"#2ecc71",border:"none",borderRadius:6,color:"#fff",fontSize:11,fontWeight:700,padding:"3px 8px",cursor:"pointer"}}>保存</button>
+                    <button onClick={()=>setEditingHeight(false)} style={{background:"rgba(255,255,255,.15)",border:"none",borderRadius:6,color:"rgba(255,255,255,.6)",fontSize:11,fontWeight:700,padding:"3px 8px",cursor:"pointer"}}>✕</button>
+                  </div>
+                ) : (
+                  <>
+                    <span style={{fontSize:11,color:"rgba(255,255,255,.5)"}}>{athlete.position}{athlete.height ? ` • ${athlete.height}cm` : " • 身長未登録"}</span>
+                    <button onClick={()=>{setHeightInput(athlete.height||"");setEditingHeight(true);}}
+                      style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.2)",borderRadius:6,color:"rgba(255,255,255,.6)",fontSize:10,fontWeight:700,padding:"2px 7px",cursor:"pointer"}}>
+                      ✏️ 身長変更
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
             <div style={{textAlign:"right"}}>
               <div style={{fontFamily:"Anton,sans-serif",fontSize:40,color:"#fff",lineHeight:1}}>{pad(new Date().getDate())}</div>
@@ -3269,6 +3300,21 @@ function PlayerView({ athlete, onBack }) {
                 <div className="stitle">⚖️ 体重</div>
                 <input className="ni" type="number" placeholder="75" step="0.1" value={record.weight} onChange={e=>setRecord(r=>({...r,weight:e.target.value}))}/>
                 <div style={{fontSize:11,color:"#8b7355",fontWeight:700,marginTop:4,textAlign:"right"}}>kg</div>
+                {record.weight && athlete.height && (()=>{
+                  const diff = parseFloat(athlete.height) - parseFloat(record.weight);
+                  const label = diff >= 101 ? "BAD 😞" : diff >= 96 ? "GOOD 👍" : "EXCELLENT 🔥";
+                  const color = diff >= 101 ? "#e74c3c" : diff >= 96 ? "#f0c040" : "#2ecc71";
+                  const bg = diff >= 101 ? "#fde8e8" : diff >= 96 ? "#fef9e7" : "#e8f8f0";
+                  return (
+                    <div style={{marginTop:8,background:bg,borderRadius:8,padding:"6px 10px",border:`1px solid ${color}40`}}>
+                      <div style={{fontSize:10,color:"#8b7355",fontWeight:700,marginBottom:2}}>身長－体重</div>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                        <span style={{fontFamily:"Anton,sans-serif",fontSize:18,color,lineHeight:1}}>{diff.toFixed(1)}</span>
+                        <span style={{fontSize:11,fontWeight:900,color,background:"#fff",padding:"2px 8px",borderRadius:10,border:`1px solid ${color}60`}}>{label}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
               <div className="card">
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
