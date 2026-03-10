@@ -3331,28 +3331,55 @@ function PlayerView({ athlete, onBack }) {
   // ── AIによる個別目標生成 ──────────────────────────────────
   const aiGoals = useMemo(()=>{
     const goals = [];
-    // 睡眠目標
-    const sleepVals = Object.values(records).filter(r=>r?.sleep).map(r=>parseFloat(r.sleep)).filter(v=>!isNaN(v));
-    if(sleepVals.length >= 3){
-      const avg = sleepVals.reduce((a,b)=>a+b,0)/sleepVals.length;
-      const target = Math.min(8.5, Math.round((avg + 0.5)*2)/2);
-      const thisWeekSleep = Object.keys(records).filter(k=>{const d=new Date(k);const now=new Date();return (now-d)<=7*86400000;}).map(k=>parseFloat(records[k]?.sleep)).filter(v=>!isNaN(v));
-      const weekAvg = thisWeekSleep.length ? (thisWeekSleep.reduce((a,b)=>a+b,0)/thisWeekSleep.length).toFixed(1) : null;
-      goals.push({ icon:"😴", label:"今週の平均睡眠", target:`${target}時間以上`, current: weekAvg ? `${weekAvg}時間` : "記録なし", met: weekAvg && parseFloat(weekAvg) >= target });
-    }
-    // カロリー目標
-    const kcalVals = Object.values(records).filter(r=>r?.saved).map(r=>calcKcal(r)).filter(v=>v>500);
-    if(kcalVals.length >= 3){
-      const avg = kcalVals.reduce((a,b)=>a+b,0)/kcalVals.length;
-      const target = Math.round((avg * 1.05)/100)*100;
-      const todayKcal = calcKcal(record);
-      goals.push({ icon:"🍚", label:"今日の摂取カロリー", target:`${target}kcal以上`, current: todayKcal ? `${todayKcal}kcal` : "未記録", met: todayKcal >= target });
-    }
+
     // 連続記録目標
     const streak = (() => { let s=0; const today = new Date(); for(let i=0;i<30;i++){ const d=new Date(today); d.setDate(d.getDate()-i); const k=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; if(records[k]?.saved) s++; else break; } return s; })();
-    goals.push({ icon:"🔥", label:"連続記録", target:"7日以上", current:`${streak}日`, met: streak >= 7 });
+    const streakTarget = streak >= 7 ? 14 : streak >= 3 ? 7 : 3;
+    goals.push({ icon:"🔥", label:"連続記録", target:`${streakTarget}日以上`, current:`${streak}日`, met: streak >= streakTarget });
+
+    // インボディから個別目標
+    const inbodyData = INBODY_DATA?.athletes?.[athlete.name];
+    const measurements = inbodyData?.measurements?.filter(ms=>ms['筋肉量(kg)']!=null);
+    if(measurements?.length >= 2){
+      const latest = measurements[measurements.length-1];
+      const prev   = measurements[measurements.length-2];
+      // 筋肉量の変化
+      const muscleLatest = latest['筋肉量(kg)'];
+      const musclePrev   = prev['筋肉量(kg)'];
+      const muscleDiff   = muscleLatest - musclePrev;
+      goals.push({
+        icon:"💪", label:"筋肉量（前回比）",
+        target:"+0.5kg以上",
+        current: `${muscleDiff>=0?"+":""}${muscleDiff.toFixed(1)}kg`,
+        met: muscleDiff >= 0.5,
+        sub: `最新 ${muscleLatest}kg（${latest.date}）`
+      });
+      // 体脂肪率の変化
+      const fatLatest = latest['体脂肪率(%)'];
+      const fatPrev   = prev['体脂肪率(%)'];
+      if(fatLatest != null && fatPrev != null){
+        const fatDiff = fatLatest - fatPrev;
+        goals.push({
+          icon:"📉", label:"体脂肪率（前回比）",
+          target:"維持 or 減少",
+          current: `${fatDiff>=0?"+":""}${fatDiff.toFixed(1)}%`,
+          met: fatDiff <= 0,
+          sub: `最新 ${fatLatest}%（${latest.date}）`
+        });
+      }
+    } else if(measurements?.length === 1){
+      const latest = measurements[0];
+      goals.push({
+        icon:"💪", label:"筋肉量",
+        target:"次回測定で+0.5kg",
+        current: `${latest['筋肉量(kg)']}kg`,
+        met: false,
+        sub: `基準値（${latest.date}）`
+      });
+    }
+
     return goals;
-  }, [records, record]);
+  }, [records, athlete.name]);
 
   // ── アプリ起動時のキャラクター反応 ────────────────────────
   useEffect(()=>{
@@ -3769,6 +3796,7 @@ function PlayerView({ athlete, onBack }) {
                   <div style={{flex:1}}>
                     <div style={{fontSize:12,fontWeight:700,color:"#2c1810"}}>{g.label}</div>
                     <div style={{fontSize:11,color:"#8b7355"}}>目標: {g.target}</div>
+                    {g.sub&&<div style={{fontSize:10,color:"#aaa",marginTop:1}}>{g.sub}</div>}
                   </div>
                   <div style={{textAlign:"right"}}>
                     <div style={{fontSize:12,fontWeight:700,color:g.met?"#2ecc71":"#e67e22"}}>{g.current}</div>
