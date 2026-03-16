@@ -2065,14 +2065,26 @@ function PlayerSelect({ onSelect, onBack }) {
   const today = todayKey();
   const [roster, setRoster] = useState(getRoster);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name:"", position:"投手", height:"", goal:"bulk" });
+  const [form, setForm] = useState({ name:"", position:"投手", height:"", goal:"bulk", grade:2 });
   const [err, setErr] = useState("");
   const [todayRecs, setTodayRecs] = useState({}); // 全選手の今日の記録
+
+  // 現在の学年を計算（4月1日に繰り上がり、上限3年）
+  const calcCurrentGrade = (a) => {
+    if(!a.gradeBaseYear) return a.grade || null;
+    const now = new Date();
+    const yearsPassed = now.getFullYear() - a.gradeBaseYear + (now.getMonth() >= 3 ? 1 : 0);
+    return Math.min(3, 1 + yearsPassed);
+  };
 
   const register = () => {
     if (!form.name.trim()) { setErr("名前を入力してください"); return; }
     if (roster.find(a => a.name === form.name.trim())) { setErr("同じ名前の選手がすでに登録されています"); return; }
-    const newAthlete = { id: genId(), name: form.name.trim(), position: form.position, height: form.height.trim(), goal: form.goal || "bulk" };
+    // 入学年度を逆算して保存（4月基準）
+    const now = new Date();
+    const gradeNow = form.grade;
+    const gradeBaseYear = now.getFullYear() - (gradeNow - 1) - (now.getMonth() >= 3 ? 0 : 1);
+    const newAthlete = { id: genId(), name: form.name.trim(), position: form.position, height: form.height.trim(), goal: form.goal || "bulk", grade: form.grade, gradeBaseYear };
     // InBodyデータから身長を自動取得
     const inbody = INBODY_DATA.athletes[form.name.trim()];
     if (inbody?.measurements?.length > 0) {
@@ -2084,7 +2096,7 @@ function PlayerSelect({ onSelect, onBack }) {
     setRoster(next);
     syncRosterToSupabase(newAthlete);
     setShowForm(false);
-    setForm({ name:"", position:"投手", height:"", goal:"bulk" });
+    setForm({ name:"", position:"投手", height:"", goal:"bulk", grade:2 });
     setErr("");
     onSelect(newAthlete);
   };
@@ -2255,6 +2267,17 @@ function PlayerSelect({ onSelect, onBack }) {
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 <input className="ti" placeholder="例: 175" type="number" min="100" max="230" value={form.height} onChange={e=>setForm(f=>({...f,height:e.target.value}))} style={{fontSize:16,flex:1}}/>
                 <span style={{fontWeight:700,color:"#8b7355",fontSize:14,whiteSpace:"nowrap"}}>cm</span>
+              </div>
+            </div>
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#1c3a1c",letterSpacing:1,marginBottom:6}}>学年（現在）</div>
+              <div style={{display:"flex",gap:8}}>
+                {[1,2,3].map(g=>(
+                  <button key={g} onClick={()=>setForm(f=>({...f,grade:g}))}
+                    style={{flex:1,padding:"12px 6px",borderRadius:10,border:`2px solid ${form.grade===g?"#1c3a1c":"#ddd"}`,background:form.grade===g?"#1c3a1c":"#f9f5ed",cursor:"pointer",fontFamily:"Anton,sans-serif",fontSize:18,color:form.grade===g?"#f0e68c":"#8b7355",transition:"all .2s"}}>
+                    {g}年
+                  </button>
+                ))}
               </div>
             </div>
             <div style={{marginBottom:14}}>
@@ -2581,6 +2604,33 @@ function CoachView({ onBack, onDetail }) {
                         {/* メモ */}
                         {a.todayRec.memo&&<div style={{fontSize:11,color:"#555",background:"#fff",padding:"6px 10px",borderRadius:8,border:"1px solid #e0e0e0"}}>💬 {a.todayRec.memo}</div>}
                       </> : <div style={{textAlign:"center",padding:"12px 0",color:"#aaa",fontSize:12}}>本日はまだ記録を提出していません</div>}
+                      {/* 学年変更 */}
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,padding:"8px 10px",background:"#f5f8f5",borderRadius:8}}>
+                        <span style={{fontSize:11,fontWeight:700,color:"#1c3a1c",whiteSpace:"nowrap"}}>📚 学年:</span>
+                        {[1,2,3].map(g=>{
+                          const cur = (() => {
+                            if(!a.gradeBaseYear) return a.grade || null;
+                            const now = new Date();
+                            const yp = now.getFullYear() - a.gradeBaseYear + (now.getMonth() >= 3 ? 1 : 0);
+                            return Math.min(3, 1 + yp);
+                          })();
+                          const isCur = cur === g;
+                          return (
+                            <button key={g} onClick={e=>{
+                              e.stopPropagation();
+                              const now = new Date();
+                              const gradeBaseYear = now.getFullYear() - (g - 1) - (now.getMonth() >= 3 ? 0 : 1);
+                              const updated = {...a, grade: g, gradeBaseYear};
+                              const next = roster.map(r => r.id===a.id ? updated : r);
+                              saveRoster(next); setRoster(next);
+                              syncRosterToSupabase(updated);
+                            }}
+                              style={{flex:1,padding:"6px 4px",borderRadius:8,border:`2px solid ${isCur?"#1c3a1c":"#ddd"}`,background:isCur?"#1c3a1c":"#fff",color:isCur?"#f0e68c":"#8b7355",fontFamily:"Anton,sans-serif",fontSize:14,cursor:"pointer",transition:"all .15s"}}>
+                              {g}年
+                            </button>
+                          );
+                        })}
+                      </div>
                       {/* 詳細ページへ */}
                       <button onClick={e=>{e.stopPropagation();onDetail(a);}}
                         style={{width:"100%",marginTop:10,padding:"9px 0",background:"#1c3a1c",border:"none",borderRadius:8,color:"#f0e68c",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Noto Sans JP',sans-serif"}}>
@@ -3717,6 +3767,41 @@ function PlayerView({ athlete, onBack }) {
 
           {/* TODAY */}
           {tab==="today"&&<>
+            {/* ── 残り日数カウントダウン ── */}
+            {(()=>{
+              const now = new Date();
+              const currentGrade = (() => {
+                if(!athlete.gradeBaseYear) return athlete.grade || null;
+                const yp = now.getFullYear() - athlete.gradeBaseYear + (now.getMonth() >= 3 ? 1 : 0);
+                return Math.min(3, 1 + yp);
+              })();
+              if(!currentGrade) return null;
+              // 目標日: 3年=2026.7.1、2年=2027.7.1、1年=2028.7.1
+              const targetYear = 2026 + (3 - currentGrade);
+              const targetDate = new Date(targetYear, 6, 1); // 7月1日
+              const diffMs = targetDate - now;
+              const daysLeft = Math.max(0, Math.ceil(diffMs / 86400000));
+              const totalDays = Math.ceil((targetDate - new Date(targetYear - 3 + currentGrade - 1 < 0 ? targetYear : targetYear, 6-12, 1)) / 86400000);
+              const colors = {1:"#2ecc71", 2:"#f0e68c", 3:"#ff6b35"};
+              const color = colors[currentGrade] || "#f0e68c";
+              return (
+                <div style={{marginBottom:14,background:"#1c3a1c",border:`2px solid ${color}40`,borderRadius:14,padding:"16px 18px",textAlign:"center",position:"relative",overflow:"hidden"}}>
+                  <div style={{position:"absolute",top:0,left:0,right:0,bottom:0,opacity:.04,backgroundImage:"repeating-linear-gradient(45deg,#fff 0,#fff 1px,transparent 1px,transparent 12px)"}}/>
+                  <div style={{fontSize:11,fontWeight:700,color:`${color}cc`,letterSpacing:2,marginBottom:4}}>
+                    ⚾ {currentGrade}年生 — 夏までの残り日数
+                  </div>
+                  <div style={{display:"flex",alignItems:"baseline",justifyContent:"center",gap:4}}>
+                    <span style={{fontFamily:"Anton,sans-serif",fontSize:64,color,lineHeight:1,letterSpacing:-2}}>{daysLeft}</span>
+                    <span style={{fontFamily:"Anton,sans-serif",fontSize:22,color:`${color}cc`}}>日</span>
+                  </div>
+                  <div style={{fontSize:11,color:"rgba(255,255,255,.4)",marginTop:4}}>
+                    {targetYear}年7月1日まで
+                  </div>
+                  {daysLeft <= 30 && <div style={{marginTop:6,fontSize:13,fontWeight:700,color:"#ff6b35"}}>🔥 ラストスパート！</div>}
+                  {daysLeft <= 7 && <div style={{fontSize:12,fontWeight:700,color:"#ff6b35"}}>後悔のない毎日を！</div>}
+                </div>
+              );
+            })()}
             {/* ── 月間目標カード ── */}
             <div className="card" style={{marginBottom:14,background:monthGoal.phase==="muscle"?"linear-gradient(135deg,#1a1a3a,#2a2a5a)":"linear-gradient(135deg,#1c3a1c,#2d5a2d)",border:`3px solid ${monthGoal.phase==="muscle"?"#6699ff60":"#f0e68c60"}`}}>
               {/* タイトル大見出し */}
