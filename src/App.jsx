@@ -2110,7 +2110,10 @@ function PlayerSelect({ onSelect, onBack }) {
     ]).then(([sbRoster, sbToday]) => {
       if (sbRoster.length > 0) {
         const local = getRoster();
-        const merged = [...sbRoster];
+        const merged = sbRoster.map(s => {
+          const loc = local.find(a => a.id === s.id);
+          return loc ? { ...s, grade: loc.grade ?? s.grade, gradeBaseYear: loc.gradeBaseYear ?? s.gradeBaseYear } : s;
+        });
         local.forEach(a => { if (!merged.find(s => s.id === a.id)) merged.push(a); });
         saveRoster(merged);
         setRoster(merged);
@@ -2341,7 +2344,10 @@ function CoachView({ onBack, onDetail }) {
     ]).then(([sbRoster, sbRecords]) => {
       if (sbRoster.length > 0) {
         const local = getRoster();
-        const merged = [...sbRoster];
+        const merged = sbRoster.map(s => {
+          const loc = local.find(a => a.id === s.id);
+          return loc ? { ...s, grade: loc.grade ?? s.grade, gradeBaseYear: loc.gradeBaseYear ?? s.gradeBaseYear } : s;
+        });
         local.forEach(a => { if (!merged.find(s => s.id === a.id)) merged.push(a); });
         saveRoster(merged);
         setRoster(merged);
@@ -3602,7 +3608,6 @@ function PlayerView({ athlete, onBack }) {
                   return (
                     <button key={g} onClick={async()=>{
                       const now = new Date();
-                      // 現在の年度（4月始まり）を基準年として保存
                       const currentSchoolYear = now.getFullYear() + (now.getMonth() >= 3 ? 0 : -1);
                       const gradeBaseYear = currentSchoolYear;
                       athlete.grade = g; athlete.gradeBaseYear = gradeBaseYear;
@@ -3610,7 +3615,7 @@ function PlayerView({ athlete, onBack }) {
                       const roster = getRoster();
                       const idx = roster.findIndex(a=>a.id===athlete.id);
                       if(idx>=0){ roster[idx].grade=g; roster[idx].gradeBaseYear=gradeBaseYear; saveRoster(roster); }
-                      try { await sbFetch(`roster?id=eq.${athlete.id}`,{method:"PATCH",body:JSON.stringify({grade:g,grade_base_year:gradeBaseYear}),headers:{"Prefer":"return=representation"}}); } catch(e){}
+                      syncRosterToSupabase({...athlete, grade:g, gradeBaseYear});
                       setToast(`✅ ${g}年生に設定しました`);
                     }}
                       style={{padding:"2px 10px",borderRadius:6,border:`1px solid ${isCur?"#f0e68c":"rgba(255,255,255,.2)"}`,background:isCur?"rgba(240,230,140,.2)":"rgba(255,255,255,.08)",color:isCur?"#f0e68c":"rgba(255,255,255,.5)",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Noto Sans JP',sans-serif"}}>
