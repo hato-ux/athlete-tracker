@@ -51,7 +51,10 @@ async function syncRosterToSupabase(athlete) {
   try {
     await sbFetch("roster", {
       method: "POST",
-      body: JSON.stringify(athlete),
+      body: JSON.stringify({
+        ...athlete,
+        grade_base_year: athlete.gradeBaseYear ?? null,
+      }),
       headers: { "Prefer": "resolution=merge-duplicates,return=representation" }
     });
   } catch(e) { console.warn("Supabase roster sync failed", e); }
@@ -2112,7 +2115,9 @@ function PlayerSelect({ onSelect, onBack }) {
         const local = getRoster();
         const merged = sbRoster.map(s => {
           const loc = local.find(a => a.id === s.id);
-          return loc ? { ...s, grade: loc.grade ?? s.grade, gradeBaseYear: loc.gradeBaseYear ?? s.gradeBaseYear } : s;
+          const grade = s.grade ?? loc?.grade ?? null;
+          const gradeBaseYear = s.grade_base_year ?? loc?.gradeBaseYear ?? null;
+          return { ...s, grade, gradeBaseYear };
         });
         local.forEach(a => { if (!merged.find(s => s.id === a.id)) merged.push(a); });
         saveRoster(merged);
@@ -2346,7 +2351,9 @@ function CoachView({ onBack, onDetail }) {
         const local = getRoster();
         const merged = sbRoster.map(s => {
           const loc = local.find(a => a.id === s.id);
-          return loc ? { ...s, grade: loc.grade ?? s.grade, gradeBaseYear: loc.gradeBaseYear ?? s.gradeBaseYear } : s;
+          const grade = s.grade ?? loc?.grade ?? null;
+          const gradeBaseYear = s.grade_base_year ?? loc?.gradeBaseYear ?? null;
+          return { ...s, grade, gradeBaseYear };
         });
         local.forEach(a => { if (!merged.find(s => s.id === a.id)) merged.push(a); });
         saveRoster(merged);
