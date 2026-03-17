@@ -2083,7 +2083,8 @@ function PlayerSelect({ onSelect, onBack }) {
     // 入学年度を逆算して保存（4月基準）
     const now = new Date();
     const gradeNow = form.grade;
-    const gradeBaseYear = now.getFullYear() - (gradeNow - 1) - (now.getMonth() >= 3 ? 0 : 1);
+    const currentSchoolYear = now.getFullYear() + (now.getMonth() >= 3 ? 0 : -1);
+    const gradeBaseYear = currentSchoolYear;
     const newAthlete = { id: genId(), name: form.name.trim(), position: form.position, height: form.height.trim(), goal: form.goal || "bulk", grade: form.grade, gradeBaseYear };
     // InBodyデータから身長を自動取得
     const inbody = INBODY_DATA.athletes[form.name.trim()];
@@ -2568,7 +2569,8 @@ function CoachView({ onBack, onDetail }) {
                   </div>
                   {/* 展開詳細 */}
                   {isExpanded && !deleteMode && (
-                    <div style={{background:"#f5f8ff",padding:"12px 14px",borderTop:"1px solid #e8edf8"}}>
+                    <div style={{background:"#f5f8ff",padding:"12px 14px",borderTop:"1px solid #e8edf8"}}
+                      onClick={e=>e.stopPropagation()}>
                       {/* 今日のデータ詳細 */}
                       {a.todayRec?.saved ? <>
                         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:10}}>
@@ -2604,33 +2606,6 @@ function CoachView({ onBack, onDetail }) {
                         {/* メモ */}
                         {a.todayRec.memo&&<div style={{fontSize:11,color:"#555",background:"#fff",padding:"6px 10px",borderRadius:8,border:"1px solid #e0e0e0"}}>💬 {a.todayRec.memo}</div>}
                       </> : <div style={{textAlign:"center",padding:"12px 0",color:"#aaa",fontSize:12}}>本日はまだ記録を提出していません</div>}
-                      {/* 学年変更 */}
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,padding:"8px 10px",background:"#f5f8f5",borderRadius:8}}>
-                        <span style={{fontSize:11,fontWeight:700,color:"#1c3a1c",whiteSpace:"nowrap"}}>📚 学年:</span>
-                        {[1,2,3].map(g=>{
-                          const cur = (() => {
-                            if(!a.gradeBaseYear) return a.grade || null;
-                            const now = new Date();
-                            const yp = now.getFullYear() - a.gradeBaseYear + (now.getMonth() >= 3 ? 1 : 0);
-                            return Math.min(3, 1 + yp);
-                          })();
-                          const isCur = cur === g;
-                          return (
-                            <button key={g} onClick={e=>{
-                              e.stopPropagation();
-                              const now = new Date();
-                              const gradeBaseYear = now.getFullYear() - (g - 1) - (now.getMonth() >= 3 ? 0 : 1);
-                              const updated = {...a, grade: g, gradeBaseYear};
-                              const next = roster.map(r => r.id===a.id ? updated : r);
-                              saveRoster(next); setRoster(next);
-                              syncRosterToSupabase(updated);
-                            }}
-                              style={{flex:1,padding:"6px 4px",borderRadius:8,border:`2px solid ${isCur?"#1c3a1c":"#ddd"}`,background:isCur?"#1c3a1c":"#fff",color:isCur?"#f0e68c":"#8b7355",fontFamily:"Anton,sans-serif",fontSize:14,cursor:"pointer",transition:"all .15s"}}>
-                              {g}年
-                            </button>
-                          );
-                        })}
-                      </div>
                       {/* 詳細ページへ */}
                       <button onClick={e=>{e.stopPropagation();onDetail(a);}}
                         style={{width:"100%",marginTop:10,padding:"9px 0",background:"#1c3a1c",border:"none",borderRadius:8,color:"#f0e68c",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Noto Sans JP',sans-serif"}}>
@@ -3271,6 +3246,22 @@ function PlayerView({ athlete, onBack }) {
   const [teamToday, setTeamToday] = useState([]);
   const [editingHeight, setEditingHeight] = useState(false);
   const [heightInput, setHeightInput] = useState(athlete.height || "");
+  const [athleteInfo, setAthleteInfo] = useState({grade: athlete.grade, gradeBaseYear: athlete.gradeBaseYear});
+
+  // 現在の学年を計算（設定時の学年＋経過年数、4月1日繰り上がり、上限3年）
+  const currentGrade = (() => {
+    if(!athleteInfo.grade) return null;
+    if(!athleteInfo.gradeBaseYear) return athleteInfo.grade;
+    const now = new Date();
+    // 設定した年度からの経過年数（4月1日が新年度）
+    const setYear = athleteInfo.gradeBaseYear;
+    const setGrade = athleteInfo.grade;
+    const nowYear = now.getFullYear();
+    const isAfterApril = now.getMonth() >= 3; // 4月=3
+    const currentSchoolYear = nowYear + (isAfterApril ? 0 : -1); // 現在の年度（4月始まり）
+    const yearsElapsed = currentSchoolYear - setYear;
+    return Math.min(3, setGrade + yearsElapsed);
+  })();
 
   // チーム全員の今日の記録を取得
   useEffect(()=>{
@@ -3603,6 +3594,31 @@ function PlayerView({ athlete, onBack }) {
                   </>
                 )}
               </div>
+              {/* 学年設定 */}
+              <div style={{display:"flex",alignItems:"center",gap:6,marginTop:6}}>
+                <span style={{fontSize:10,color:"rgba(255,255,255,.5)",fontWeight:700}}>📚 学年:</span>
+                {[1,2,3].map(g=>{
+                  const isCur = currentGrade === g;
+                  return (
+                    <button key={g} onClick={async()=>{
+                      const now = new Date();
+                      // 現在の年度（4月始まり）を基準年として保存
+                      const currentSchoolYear = now.getFullYear() + (now.getMonth() >= 3 ? 0 : -1);
+                      const gradeBaseYear = currentSchoolYear;
+                      athlete.grade = g; athlete.gradeBaseYear = gradeBaseYear;
+                      setAthleteInfo({grade: g, gradeBaseYear});
+                      const roster = getRoster();
+                      const idx = roster.findIndex(a=>a.id===athlete.id);
+                      if(idx>=0){ roster[idx].grade=g; roster[idx].gradeBaseYear=gradeBaseYear; saveRoster(roster); }
+                      try { await sbFetch(`roster?id=eq.${athlete.id}`,{method:"PATCH",body:JSON.stringify({grade:g,grade_base_year:gradeBaseYear}),headers:{"Prefer":"return=representation"}}); } catch(e){}
+                      setToast(`✅ ${g}年生に設定しました`);
+                    }}
+                      style={{padding:"2px 10px",borderRadius:6,border:`1px solid ${isCur?"#f0e68c":"rgba(255,255,255,.2)"}`,background:isCur?"rgba(240,230,140,.2)":"rgba(255,255,255,.08)",color:isCur?"#f0e68c":"rgba(255,255,255,.5)",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Noto Sans JP',sans-serif"}}>
+                      {g}年
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <div style={{textAlign:"right"}}>
               <div style={{fontFamily:"Anton,sans-serif",fontSize:40,color:"#fff",lineHeight:1}}>{pad(new Date().getDate())}</div>
@@ -3769,13 +3785,8 @@ function PlayerView({ athlete, onBack }) {
           {tab==="today"&&<>
             {/* ── 残り日数カウントダウン ── */}
             {(()=>{
-              const now = new Date();
-              const currentGrade = (() => {
-                if(!athlete.gradeBaseYear) return athlete.grade || null;
-                const yp = now.getFullYear() - athlete.gradeBaseYear + (now.getMonth() >= 3 ? 1 : 0);
-                return Math.min(3, 1 + yp);
-              })();
               if(!currentGrade) return null;
+              const now = new Date();
               // 目標日: 3年=2026.7.1、2年=2027.7.1、1年=2028.7.1
               const targetYear = 2026 + (3 - currentGrade);
               const targetDate = new Date(targetYear, 6, 1); // 7月1日
